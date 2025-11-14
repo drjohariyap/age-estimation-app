@@ -1,136 +1,124 @@
 import streamlit as st
-import tensorflow as tf
 import numpy as np
 from PIL import Image
+import onnxruntime as ort
 
-# -------------------------------------------------------
-# PAGE CONFIG
-# -------------------------------------------------------
+# =========================================================
+# Page Configuration
+# =========================================================
 st.set_page_config(
     page_title="Dental Age Estimation",
     page_icon="🦷",
     layout="centered"
 )
 
-# -------------------------------------------------------
-# CUSTOM CSS
-# -------------------------------------------------------
+# =========================================================
+# Custom CSS for Modern UI
+# =========================================================
 st.markdown("""
     <style>
+        .block-container {
+            padding-top: 2rem;
+            max-width: 750px;
+        }
 
-    /* Center the main content */
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-        max-width: 720px;
-    }
+        .card {
+            background: #ffffff;
+            padding: 20px 25px;
+            border-radius: 14px;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+            margin-bottom: 30px;
+        }
 
-    /* Header styling */
-    h1 {
-        text-align: center;
-        font-weight: 700 !important;
-    }
+        .prediction {
+            font-size: 32px;
+            font-weight: 700;
+            color: #2E86C1;
+            text-align: center;
+            margin-top: 15px;
+        }
 
-    /* Card container */
-    .card {
-        background-color: #ffffff;
-        padding: 25px;
-        border-radius: 12px;
-        box-shadow: 0px 3px 12px rgba(0,0,0,0.12);
-        margin-bottom: 25px;
-    }
-
-    /* Prediction box */
-    .prediction {
-        font-size: 28px;
-        font-weight: 700;
-        text-align: center;
-        color: #2E86C1;
-        margin-top: 10px;
-    }
-
-    /* Upload Section */
-    .upload-title {
-        text-align: center;
-        font-size: 20px;
-        font-weight: 600;
-    }
-
+        h1 {
+            text-align: center;
+            font-weight: 800 !important;
+        }
     </style>
 """, unsafe_allow_html=True)
 
-# -------------------------------------------------------
-# LOAD MODEL
-# -------------------------------------------------------
-MODEL_PATH = "best_age_cnn.h5"
+# =========================================================
+# ONNX Model Loading
+# =========================================================
+MODEL_PATH = "model.onnx"
 IMG_SIZE = 224
 
 @st.cache_resource
-def load_model():
-    return tf.keras.models.load_model(MODEL_PATH)
+def load_onnx_model():
+    session = ort.InferenceSession(
+        MODEL_PATH,
+        providers=["CPUExecutionProvider"]
+    )
+    return session
 
-model = load_model()
+session = load_onnx_model()
 
-# -------------------------------------------------------
-# FUNCTIONS
-# -------------------------------------------------------
+# =========================================================
+# Image Preprocessing
+# =========================================================
 def preprocess(img):
     img = img.resize((IMG_SIZE, IMG_SIZE))
-    img = np.array(img) / 255.0
-    img = np.expand_dims(img, axis=0)
-    return img.astype("float32")
+    img = np.array(img).astype("float32") / 255.0
+    img = np.expand_dims(img, axis=0)   # shape: (1,224,224,3)
+    return img
 
-# -------------------------------------------------------
-# SIDEBAR
-# -------------------------------------------------------
+# =========================================================
+# Sidebar Instructions
+# =========================================================
 st.sidebar.title("Instructions")
-st.sidebar.markdown("""
-1. Upload a **radiograph** of the **left maxillary canine**  
-2. The image will be processed by the CNN  
-3. The system predicts **chronological age**  
+st.sidebar.write("""
+1. Upload a **radiograph** of the **left maxillary canine**.
+2. Image will be processed by CNN (ONNX runtime).
+3. The model outputs an age estimate.
 """)
 
-st.sidebar.info("Model Loaded: EfficientNet-based CNN")
+st.sidebar.info("Model format: ONNX (TensorFlow-free)")
 
-# -------------------------------------------------------
-# MAIN HEADER
-# -------------------------------------------------------
-st.markdown("<h1>DENTAL AGE ESTIMATION (CNN MODEL)</h1>", unsafe_allow_html=True)
-st.markdown("### AI Prediction for Left Maxillary Canine Radiographs")
+# =========================================================
+# Main Header
+# =========================================================
+st.markdown("<h1>DENTAL AGE ESTIMATION (CNN – ONNX Model)</h1>", unsafe_allow_html=True)
+st.markdown("### Upload a radiograph to estimate age.")
 
-# -------------------------------------------------------
-# UPLOAD CARD
-# -------------------------------------------------------
+# =========================================================
+# File Upload Section
+# =========================================================
 st.markdown('<div class="card">', unsafe_allow_html=True)
+uploaded_file = st.file_uploader("Upload radiograph (JPG/PNG)", type=["jpg", "jpeg", "png"])
+st.markdown("</div>", unsafe_allow_html=True)
 
-st.markdown('<p class="upload-title">Upload Radiograph Image</p>', unsafe_allow_html=True)
-uploaded_file = st.file_uploader(" ", type=["jpg", "jpeg", "png"])
-
-st.markdown('</div>', unsafe_allow_html=True)
-
-# -------------------------------------------------------
-# PROCESS & PREDICT
-# -------------------------------------------------------
+# =========================================================
+# Prediction Logic
+# =========================================================
 if uploaded_file:
-
-    # Display Image Card
+    # Display uploaded image
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("### Uploaded Radiograph")
     img = Image.open(uploaded_file).convert("RGB")
-    st.image(img, use_column_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.image(img, caption="Uploaded Radiograph", use_column_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    # Processing Animation
-    with st.spinner("Processing image and estimating age..."):
-        processed = preprocess(img)
-        pred_age = model.predict(processed)[0][0]
+    # Preprocess
+    x = preprocess(img)
 
-    # Prediction Result Card
+    # Model inference
+    inputs = {session.get_inputs()[0].name: x}
+    with st.spinner("Estimating age..."):
+        pred = session.run(None, inputs)[0][0][0]  # first batch, first output
+
+    # Prediction Result
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown("### Estimated Age")
-    st.markdown(f'<div class="prediction">{pred_age:.2f} years</div>', unsafe_allow_html=True)
-    st.success("Age estimation completed successfully.")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="prediction">{pred:.2f} years</div>', unsafe_allow_html=True)
+    st.success("Prediction completed!")
+    st.markdown("</div>", unsafe_allow_html=True)
 
 else:
     st.info("Please upload an image to begin.")
